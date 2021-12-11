@@ -46,17 +46,25 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Niraf Islam and nmi235
 
 ### Introduction 
 
 Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
 
+The dataset I chose is the salaries dataset. This dataset i found to be interesting due to the fact that I am a college student who is studying economics and business, i was curious to see what type of pay professors get with different variables and to see of there was any correlation between them. The variables in this dataset consist of "rank" which tells if they are a assistant professor or professor, "yrs.since.phd" the time since they received their PhD, "yrs.service" which is how long they have been in that position, "sex" which says what gender they are, and "salary" which consists of how much they make, ans finally there is a discipline variable which consisted of A and B but I converted that into a binary variable of 0 and 1 for my calculations. 
+
 ```{R}
 library(tidyverse)
 # read your datasets in here, e.g., with read_csv()
-
+library(fivethirtyeight)
+library(carData)
+data1 <- Salaries
+data1$discipline <- ifelse(data1$discipline == "A", 1, 0) # Create a binary variable
 # if your dataset needs tidying, do so here
+glimpse(data1)
+summary(data1)
+# Everything sounds good...
 
 # any other code here
 ```
@@ -66,53 +74,164 @@ library(tidyverse)
 ```{R}
 library(cluster)
 # clustering code here
+clust_dat = data1 %>% 
+  select(yrs.since.phd, yrs.service, salary)
+
+# Visualizing the variables
+library(GGally)
+ggpairs(clust_dat)
+
+# Choosing the best 'k' for k-means 
+sil_width<-vector() #create empty vector
+#for k=1, 2, ... 10, compute WSS and save it in wss
+for(i in 2:10){
+  temp <- clust_dat %>% pam(k=i)
+  sil_width[i] <- temp$silinfo$avg.width
+}
+
+ggplot() +
+  geom_point(aes(x=1:10,y=sil_width)) +
+  geom_path(aes(x=1:10,y=sil_width)) +
+  xlab("clusters") +
+  scale_x_continuous(breaks=1:10)
+
+# k = 7 sounds good!
+best_k = 7 # picking number of clusters based on largest average silhouette width
+
+set.seed(322) #just makes our output match
+pam1 <- clust_dat %>% pam(k=best_k) #set number of clusters k
+pam1
+```
+
+## Visualizing the clusters
+```{r}
+ggpairs(clust_dat, columns = 1:3,
+        ggplot2::aes(colour=as.factor(pam1$clustering),
+                     alpha=0.7))
 ```
 
 Discussion of clustering here
+
+First we selected all the numeric variables except the binary and then created a ggpairs plot. In that plot we can see the correlations between the three variables to see which ones are stronger. We can also see the distributions of each variable we selected to see where most of the common numbers lie and to see if there is any over lap between them. Then I looked for the best K-means for my data set then used that number to cluster the data and graph it again to see the correlations.
+
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
 # PCA code here
+pca1 = princomp(clust_dat, cor=T)
+```
+
+```{r}
+library(factoextra)
+pca1 %>% 
+  fviz_pca()
 ```
 
 Discussions of PCA here. 
+
+With this graph here we can see there is a very similar and positive correlation between years of service to years since phd.
 
 ###  Linear Classifier
 
 ```{R}
 # linear classifier code here
+fit <- glm(discipline ~., data=data1,
+           family = "binomial")
+summary(fit)
 ```
+
+```{r}
+prob <- predict(fit, type="response") #get predicted probabilities
+class_diag(prob, data1$discipline, positive=1)
+```
+
 
 ```{R}
 # cross-validation of linear classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data <- data1[sample(nrow(data1)),] #randomly order rows
+folds<-cut(seq(1:nrow(data)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  truth<-test$discipline ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-glm(discipline~.,data=train,family="binomial")
+  ## Test model on test set (fold i)
+  probs<-predict(fit,newdata = test,type="response")
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean) #average diagnostics across all k folds
 ```
 
 Discussion here
+
+Here I used different linear classifications to calculate the Area under the curve.
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
 # non-parametric classifier code here
+fit<-knn3(discipline~.,data=data1)
+probs<-predict(fit,newdata = data1)[,2]
+truth<-data1$discipline
+class_diag(probs,truth, positive=1)
 ```
 
 ```{R}
 # cross-validation of np classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data<-data1[sample(nrow(data1)),] #randomly order rows
+folds<-cut(seq(1:nrow(data)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  truth<-test$discipline ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-knn3(discipline~.,data=train)
+  ## Test model on test set (fold i)
+  probs<-predict(fit,newdata = test)[,2]
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean)
 ```
 
 Discussion
-
+ Here I also calculted the area under the curve based on different train and test models. 
 
 ### Regression/Numeric Prediction
 
 ```{R}
 # regression model code here
+fit <- lm(salary~., data=data1)
+pred <- predict(fit)
+data.frame(RMSE = RMSE(pred, data1$salary),
+           Rsquared = R2(pred, data1$salary),
+           MAE = MAE(pred, data1$salary))
 ```
 
 ```{R}
 # cross-validation of regression model here
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv", 
+                              number = 10, repeats = 3)
+# Train the model
+model <- train(salary ~., data = data1, method = "lm",
+               trControl = train.control)
+# Summarize the results
+print(model)
 ```
 
 Discussion
@@ -131,8 +250,7 @@ Discussion
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
-
+I wish I were able to do some more in depth analysis on this project while coding through this project I found myself being more and more curious about the salary distribution. I wish this dataset included more varibles that would make this dataset more interesting as for example: the type of university the professors taught at, wether they are doing research or not, different states these professors were in and something like their rating based on their students pov. While it was interesting what i found with these calculations. I would have like to do some more in-depth research to find out the connections between how and why some professors get paid more or less. This would help me to do more in depth research about teacher pay which i believe is a interesting topic that i have been observing since the time i had been in high school. 
 
 
 
